@@ -80,7 +80,8 @@ typedef struct param_union {
  * and the bits pulled out using the shifts/masks.
 */
 MAVPACKED(
-typedef union {
+typedef struct param_union_extended {
+    union {
     struct {
         uint8_t is_double:1;
         uint8_t mavlink_type:7;
@@ -97,6 +98,7 @@ typedef union {
         };
     };
     uint8_t data[8];
+    };
 }) mavlink_param_union_double_t;
 
 /**

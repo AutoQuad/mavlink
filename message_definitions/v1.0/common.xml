@@ -1081,6 +1081,13 @@
                   <param index="1">Reserved</param>
                   <param index="2">Reserved</param>
               </entry>
+              
+              <entry name="MAV_CMD_DO_TRIGGER_CONTROL" value="2003">
+                   <description>Enable or disable on-board camera triggering system.</description>
+                   <param index="1">Trigger enable/disable (0 for disable, 1 for start)</param>
+                   <param index="2">Shutter integration time (in ms)</param>
+                   <param index="3">Reserved</param>
+              </entry>
 
               <entry value="2500" name="MAV_CMD_VIDEO_START_CAPTURE">
                   <description>Starts video capture</description>
@@ -1887,16 +1894,19 @@
           </message>
           <message id="64" name="LOCAL_POSITION_NED_COV">
               <description>The filtered local position (e.g. fused computer vision and accelerometers). Coordinate frame is right-handed, Z-axis down (aeronautical frame, NED / north-east-down convention)</description>
-              <field type="uint32_t" name="time_boot_ms">Timestamp (milliseconds since system boot)</field>
+              <field type="uint32_t" name="time_boot_ms">Timestamp (milliseconds since system boot). 0 for system without monotonic timestamp</field>
               <field type="uint64_t" name="time_utc">Timestamp (microseconds since UNIX epoch) in UTC. 0 for unknown. Commonly filled by the precision time source of a GPS receiver.</field>
               <field type="uint8_t" name="estimator_type" enum="MAV_ESTIMATOR_TYPE">Class id of the estimator this estimate originated from.</field>
               <field type="float" name="x">X Position</field>
               <field type="float" name="y">Y Position</field>
               <field type="float" name="z">Z Position</field>
-              <field type="float" name="vx">X Speed</field>
-              <field type="float" name="vy">Y Speed</field>
-              <field type="float" name="vz">Z Speed</field>
-              <field type="float[36]" name="covariance">Covariance matrix (first six entries are the first ROW, next six entries are the second row, etc.)</field>
+              <field type="float" name="vx">X Speed (m/s)</field>
+              <field type="float" name="vy">Y Speed (m/s)</field>
+              <field type="float" name="vz">Z Speed (m/s)</field>
+              <field type="float" name="ax">X Acceleration (m/s^2)</field>
+              <field type="float" name="ay">Y Acceleration (m/s^2)</field>
+              <field type="float" name="az">Z Acceleration (m/s^2)</field>
+              <field type="float[45]" name="covariance">Covariance matrix upper right triangular (first nine entries are the first ROW, next eight entries are the second row, etc.)</field>
           </message>
           <message id="65" name="RC_CHANNELS">
                <description>The PPM values of the RC channels received. The standard PPM modulation is as follows: 1000 microseconds: 0%, 2000 microseconds: 100%. Individual receivers/transmitters might violate this specification.</description>
@@ -2325,6 +2335,11 @@
             <field type="int64_t" name="tc1">Time sync timestamp 1</field>
             <field type="int64_t" name="ts1">Time sync timestamp 2</field>
         </message>
+        <message id="112" name="CAMERA_TRIGGER">
+            <description>Camera-IMU triggering and synchronisation message.</description>
+            <field type="uint64_t" name="time_usec">Timestamp for the image frame in microseconds</field>
+            <field type="uint32_t" name="seq">Image frame sequence</field>
+        </message>
          <message id="113" name="HIL_GPS">
              <description>The global position, as returned by the Global Positioning System (GPS). This is
                  NOT the global position estimate of the sytem, but rather a RAW sensor value. See message GLOBAL_POSITION for the global position estimate. Coordinate frame is right-handed, Z-axis up (GPS frame).</description>
@@ -2497,6 +2512,19 @@
             <field type="int32_t" name="baseline_c_mm">Current baseline in ECEF z or NED down component in mm.</field>
             <field type="uint32_t" name="accuracy">Current estimate of baseline accuracy.</field>
             <field type="int32_t" name="iar_num_hypotheses">Current number of integer ambiguity hypotheses.</field>
+        </message>
+        <message id="129" name="SCALED_IMU3">
+          <description>The RAW IMU readings for 3rd 9DOF sensor setup. This message should contain the scaled values to the described units</description>
+          <field type="uint32_t" name="time_boot_ms">Timestamp (milliseconds since system boot)</field>
+          <field type="int16_t" name="xacc">X acceleration (mg)</field>
+          <field type="int16_t" name="yacc">Y acceleration (mg)</field>
+          <field type="int16_t" name="zacc">Z acceleration (mg)</field>
+          <field type="int16_t" name="xgyro">Angular speed around X axis (millirad /sec)</field>
+          <field type="int16_t" name="ygyro">Angular speed around Y axis (millirad /sec)</field>
+          <field type="int16_t" name="zgyro">Angular speed around Z axis (millirad /sec)</field>
+          <field type="int16_t" name="xmag">X Magnetic field (milli tesla)</field>
+          <field type="int16_t" name="ymag">Y Magnetic field (milli tesla)</field>
+          <field type="int16_t" name="zmag">Z Magnetic field (milli tesla)</field>
         </message>
         <message id="130" name="DATA_TRANSMISSION_HANDSHAKE">
             <field type="uint8_t" name="type">type of requested/acknowledged data (as defined in ENUM DATA_TYPES in mavlink/include/mavlink_types.h)</field>
