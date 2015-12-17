@@ -124,34 +124,34 @@ macro(generateMavlink version definitions)
         message(STATUS "processing: ${definitionAbsPath}")
         add_custom_command( 
             OUTPUT ${targetName}-stamp
-            COMMAND PYTHONPATH=$ENV{PYTHONPATH}:${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} ${mavgen} --lang=C --wire-protocol=${version}
+            COMMAND PYTHONPATH=$ENV{PYTHONPATH}:${CMAKE_CURRENT_SOURCE_DIR} ${PYTHON_EXECUTABLE} -m pymavlink.tools.mavgen --lang=C --wire-protocol=${version}
                 --output=include/v${version} ${definitionAbsPath}
             COMMAND touch ${targetName}-stamp
-            DEPENDS ${definitionAbsPath} ${mavgen}
             )
         add_custom_target(${targetName} ALL DEPENDS ${targetName}-stamp)
     endforeach()
 endmacro()
 
 # build
-set(mavgen ${CMAKE_SOURCE_DIR}/pymavlink/generator/mavgen.py)
+set(mavgen -m pymavlink.tools.mavgen)
 set(v0.9Definitions
     ardupilotmega.xml
     common.xml
     minimal.xml
-    pixhawk.xml
     slugs.xml
     test.xml
     ualberta.xml
     )
 generateMavlink("0.9" "${v0.9Definitions}")
 set(v1.0Definitions
+    ASLUAV.xml
     ardupilotmega.xml
     autoquad.xml
     common.xml
     matrixpilot.xml
     minimal.xml
-    pixhawk.xml
+    paparazzi.xml
+    python_array_test.xml
     slugs.xml
     test.xml
     ualberta.xml

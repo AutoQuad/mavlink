@@ -82,6 +82,14 @@ class DFMessage(object):
         self._apply_multiplier = apply_multiplier
         self._fieldnames = fmt.columns
 
+    def to_dict(self):
+        d = {'mavpackettype': self.fmt.name}
+
+        for field in self._fieldnames:
+            d[field] = self.__getattr__(field)
+
+        return d
+
     def __getattr__(self, field):
         '''override field getter'''
         try:
@@ -125,7 +133,9 @@ class DFMessage(object):
                 v /= mul
             values.append(v)
         return struct.pack("BBB", 0xA3, 0x95, self.fmt.type) + struct.pack(self.fmt.msg_struct, *values)
-                
+
+    def get_fieldnames(self):
+        return self._fieldnames
 
 class DFReaderClock():
     '''base class for all the different ways we count time in logs'''
@@ -148,8 +158,8 @@ class DFReaderClock():
     def rewind_event(self):
         pass
 
-class DFReaderClock_gps_usec(DFReaderClock):
-    '''DFReaderClock_gps_usec - GPS usec - use GPS Week and GPS MS to find base'''
+class DFReaderClock_usec(DFReaderClock):
+    '''DFReaderClock_usec - use microsecond timestamps from messages'''
     def __init__(self):
         DFReaderClock.__init__(self)
 
@@ -320,23 +330,15 @@ class DFReader(object):
             self.clock.find_time_base(px4_msg_gps)
         return True
 
-    def init_clock_msec(self, msg_gps, first_ms_stamp):
+    def init_clock_msec(self):
         # it is a new style flash log with full timestamps
         self.clock = DFReaderClock_msec()
-        if not self._zero_time_base:
-            self.clock.find_time_base(msg_gps, first_ms_stamp)
-        return True
 
-    def init_clock_gps_usec(self, msg_gps, first_us_stamp):
-        self.clock = DFReaderClock_gps_usec()
-        if not self._zero_time_base:
-            self.clock.find_time_base(msg_gps, first_us_stamp)
-        return True
+    def init_clock_usec(self):
+        self.clock = DFReaderClock_usec()
 
     def init_clock_gps_interpolated(self, clock):
         self.clock = clock
-
-        return True
 
     def init_clock(self):
         '''work out time basis for the log'''
@@ -355,6 +357,7 @@ class DFReader(object):
         first_us_stamp = None
         first_ms_stamp = None
 
+        have_good_clock = False
         while True:
             m = self.recv_msg()
             if m is None:
@@ -373,13 +376,19 @@ class DFReader(object):
             if type == 'GPS' or type == 'GPS2':
                 if getattr(m, "TimeUS", 0) != 0 and \
                    getattr(m, "GWk", 0) != 0: # everything-usec-timestamped
-                    self.init_clock_gps_usec(m, first_us_stamp)
+                    self.init_clock_usec()
+                    if not self._zero_time_base:
+                        self.clock.find_time_base(m, first_us_stamp)
+                    have_good_clock = True
                     break
                 if getattr(m, "T", 0) != 0 and \
                    getattr(m, "Week", 0) != 0: # GPS is msec-timestamped
                     if first_ms_stamp is None:
                         first_ms_stamp = m.T
-                    self.init_clock_msec(m, first_ms_stamp)
+                    self.init_clock_msec()
+                    if not self._zero_time_base:
+                        self.clock.find_time_base(m, first_ms_stamp)
+                    have_good_clock = True
                     break
                 if getattr(m, "GPSTime", 0) != 0: # px4-style-only
                     px4_msg_gps = m
@@ -393,6 +402,7 @@ class DFReader(object):
                         # we wait a few more messages befoe doing
                         # this?
                         self.init_clock_gps_interpolated(gps_clock)
+                        have_good_clock = True
                         break
                     gps_interp_msg_gps1 = m
 
@@ -403,9 +413,18 @@ class DFReader(object):
 
             if px4_msg_time is not None and px4_msg_gps is not None:
                 self.init_clock_px4(px4_msg_time, px4_msg_gps)
+                have_good_clock = True
                 break
 
 #        print("clock is " + str(self.clock))
+        if not have_good_clock:
+            # we failed to find any GPS messages to set a time
+            # base for usec and msec clocks.  Also, not a
+            # PX4-style log
+            if first_us_stamp is not None:
+                self.init_clock_usec()
+            elif first_ms_stamp is not None:
+                self.init_clock_msec()
 
         self._rewind()
 
@@ -525,6 +544,7 @@ class DFReader_binary(DFReader):
             if self.remaining < 528:
                 return None
             print("Skipped %u bad bytes in log %s remaining=%u" % (skip_bytes, skip_type, self.remaining))
+            self.remaining -= skip_bytes
 
         self.offset += 3
         self.remaining -= 3
@@ -540,14 +560,19 @@ class DFReader_binary(DFReader):
                 print("out of data")
             return None
         body = self.data[self.offset:self.offset+(fmt.len-3)]
+        elements = None
         try:
             elements = list(struct.unpack(fmt.msg_struct, body))
         except Exception:
             if self.remaining < 528:
                 # we can have garbage at the end of an APM2 log
                 return None
+            # we should also cope with other corruption; logs
+            # transfered via DataFlash_MAVLink may have blocks of 0s
+            # in them, for example
             print("Failed to parse %s/%s with len %u (remaining %u)" % (fmt.name, fmt.msg_struct, len(body), self.remaining))
-            raise
+        if elements is None:
+            return self._parse_next()
         name = null_term(fmt.name)
         if name == 'FMT':
             # add to formats
@@ -600,15 +625,19 @@ class DFReader_text(DFReader):
 
     def _parse_next(self):
         '''read one message, returning it as an object'''
+
+        this_line = self.line
         while self.line < len(self.lines):
             s = self.lines[self.line].rstrip()
             elements = s.split(", ")
+            this_line = self.line
             # move to next line
             self.line += 1
             if len(elements) >= 2:
+                # this_line is good
                 break
 
-        if self.line >= len(self.lines):
+        if this_line >= len(self.lines):
             return None
 
         # cope with empty structures
@@ -616,7 +645,7 @@ class DFReader_text(DFReader):
             elements[-1] = ''
             elements.append('')
 
-        self.percent = 100.0 * (self.line / float(len(self.lines)))
+        self.percent = 100.0 * (this_line / float(len(self.lines)))
 
         msg_type = elements[0]
 
