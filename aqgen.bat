@@ -1,2 +1,2 @@
-python -m pymavlink.tools.mavgen -o ./include --lang=C ./message_definitions/v1.0/autoquad.xml
+python -m pymavlink.tools.mavgen -o ./generated/include --lang=C ./message_definitions/v1.0/autoquad.xml
 @pause
