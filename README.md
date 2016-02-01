@@ -4,8 +4,9 @@ This repository hosts the current version of the MAVLink library specifically fo
 
 We try to keep the main MAVLink project updated with our definitions, but this is always going to contain our current working version.
 
-If you just need the pre-generated C header files, they are now published in *(https://github.com/AutoQuad/mavlink_headers)*. 
-They are also included in this repository as a git subtree in the *generated* folder, for convenience.
+**If you just need the pre-generated C header files**, they are now published at https://github.com/AutoQuad/mavlink_headers . 
+
+If you want the hedeader files checked out with this repo, **you need to run `git submodule update --init`** after cloning or updating this repo.  The headers will be placed in the `generated/includes` folder.
 
 To re-generate the headers, simply run the aqgen.[bat|sh] script.
 
