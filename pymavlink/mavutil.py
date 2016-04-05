@@ -7,7 +7,7 @@ Released under GNU GPL version 3 or later
 '''
 
 import socket, math, struct, time, os, fnmatch, array, sys, errno
-import select
+import select, mavexpression
 
 # adding these extra imports allows pymavlink to be used directly with pyinstaller
 # without having complex spec files. To allow for installs that don't have ardupilotmega
@@ -20,17 +20,6 @@ except Exception:
 
 # maximum packet length for a single receive call - use the UDP limit
 UDP_MAX_PACKET_LEN = 65535
-
-'''
-Support having a $HOME/.pymavlink/mavextra.py for extra graphing functions
-'''
-home = os.getenv('HOME')
-if home is not None:
-    extra = os.path.join(home, '.pymavlink', 'mavextra.py')
-    if os.path.exists(extra):
-        import imp
-        mavuser = imp.load_source('pymavlink.mavuser', extra)
-        from pymavlink.mavuser import *
 
 # Store the MAVLink library for the currently-selected dialect
 # (set by set_dialect())
@@ -53,13 +42,7 @@ def mavlink10():
 
 def evaluate_expression(expression, vars):
     '''evaluation an expression'''
-    try:
-        v = eval(expression, globals(), vars)
-    except NameError:
-        return None
-    except ZeroDivisionError:
-        return None
-    return v
+    return mavexpression.evaluate_expression(expression, vars)
 
 def evaluate_condition(condition, vars):
     '''evaluation a conditional (boolean) statement'''
@@ -742,7 +725,11 @@ class mavserial(mavfile):
 
     def set_baudrate(self, baudrate):
         '''set baudrate'''
-        self.port.setBaudrate(baudrate)
+        try:
+            self.port.setBaudrate(baudrate)
+        except Exception:
+            # for pySerial 3.0, which doesn't have setBaudrate()
+            self.port.baudrate = baudrate
     
     def close(self):
         self.port.close()
@@ -799,6 +786,7 @@ class mavudp(mavfile):
             sys.exit(1)
         self.port = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.udp_server = input
+        self.broadcast = False
         if input:
             self.port.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.port.bind((a[0], int(a[1])))
@@ -806,6 +794,7 @@ class mavudp(mavfile):
             self.destination_addr = (a[0], int(a[1]))
             if broadcast:
                 self.port.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+                self.broadcast = True
         set_close_on_exec(self.port.fileno())
         self.port.setblocking(0)
         self.last_address = None
@@ -816,11 +805,13 @@ class mavudp(mavfile):
 
     def recv(self,n=None):
         try:
-            data, self.last_address = self.port.recvfrom(UDP_MAX_PACKET_LEN)
+            data, new_addr = self.port.recvfrom(UDP_MAX_PACKET_LEN)
         except socket.error as e:
             if e.errno in [ errno.EAGAIN, errno.EWOULDBLOCK, errno.ECONNREFUSED ]:
                 return ""
             raise
+        if self.udp_server or self.broadcast:
+            self.last_address = new_addr
         return data
 
     def write(self, buf):
@@ -829,6 +820,10 @@ class mavudp(mavfile):
                 if self.last_address:
                     self.port.sendto(buf, self.last_address)
             else:
+                if self.last_address and self.broadcast:
+                    self.destination_addr = self.last_address
+                    self.broadcast = False
+                    self.port.connect(self.destination_addr)
                 self.port.sendto(buf, self.destination_addr)
         except socket.error:
             pass
@@ -893,6 +888,63 @@ class mavtcp(mavfile):
         try:
             self.port.send(buf)
         except socket.error:
+            pass
+
+
+class mavtcpin(mavfile):
+    '''a TCP input mavlink socket'''
+    def __init__(self, device, source_system=255, retries=3, use_native=default_native):
+        a = device.split(':')
+        if len(a) != 2:
+            print("TCP ports must be specified as host:port")
+            sys.exit(1)
+        self.listen = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listen_addr = (a[0], int(a[1]))
+        self.listen.bind(self.listen_addr)
+        self.listen.listen(1)
+        self.listen.setblocking(0)
+        set_close_on_exec(self.listen.fileno())
+        self.listen.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1)
+        mavfile.__init__(self, self.listen.fileno(), "tcpin:" + device, source_system=source_system, use_native=use_native)
+        self.port = None
+
+    def close(self):
+        self.listen.close()
+
+    def recv(self,n=None):
+        if not self.port:
+            try:
+                (self.port, addr) = self.listen.accept()
+            except Exception:
+                return ''
+            self.port.setsockopt(socket.SOL_TCP, socket.TCP_NODELAY, 1) 
+            self.port.setblocking(0) 
+            set_close_on_exec(self.port.fileno())
+            self.fd = self.port.fileno()
+
+        if n is None:
+            n = self.mav.bytes_needed()
+        try:
+            data = self.port.recv(n)
+        except socket.error as e:
+            if e.errno in [ errno.EAGAIN, errno.EWOULDBLOCK ]:
+                return ""
+            self.port.close()
+            self.port = None
+            self.fd = self.listen.fileno()
+            return ''
+        return data
+
+    def write(self, buf):
+        if self.port is None:
+            return
+        try:
+            self.port.send(buf)
+        except socket.error as e:
+            if e.errno in [ errno.EPIPE ]:
+                self.port.close()
+                self.port = None
+                self.fd = self.listen.fileno()
             pass
 
 
@@ -1065,10 +1117,14 @@ def mavlink_connection(device, baud=115200, source_system=255,
         set_dialect(dialect)
     if device.startswith('tcp:'):
         return mavtcp(device[4:], source_system=source_system, retries=retries, use_native=use_native)
+    if device.startswith('tcpin:'):
+        return mavtcpin(device[6:], source_system=source_system, retries=retries, use_native=use_native)
     if device.startswith('udpin:'):
         return mavudp(device[6:], input=True, source_system=source_system, use_native=use_native)
     if device.startswith('udpout:'):
         return mavudp(device[7:], input=False, source_system=source_system, use_native=use_native)
+    if device.startswith('udpbcast:'):
+        return mavudp(device[9:], input=False, source_system=source_system, use_native=use_native, broadcast=True)
     # For legacy purposes we accept the following syntax and let the caller to specify direction
     if device.startswith('udp:'):
         return mavudp(device[4:], input=input, source_system=source_system, use_native=use_native)
@@ -1290,6 +1346,7 @@ mode_mapping_apm = {
     17 : 'QSTABILIZE',
     18 : 'QHOVER',
     19 : 'QLOITER',
+    20 : 'QLAND',
     }
 mode_mapping_acm = {
     0 : 'STABILIZE',

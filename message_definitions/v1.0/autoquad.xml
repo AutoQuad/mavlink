@@ -21,9 +21,6 @@
 			<entry value="0x00000002" name="AQ_NAV_STATUS_MANUAL">
 				<description>Flying (throttle input detected), assumed under manual control unless other mode bits are set</description>
 			</entry>
-			<!-- <entry value="0x00000002" name="AQ_NAV_STATUS_ACTIVE">
-				<description>alias for AQ_NAV_STATUS_MANUAL</description>
-			</entry> -->
 			<entry value="0x00000004" name="AQ_NAV_STATUS_ALTHOLD">
 				<description>Altitude hold engaged</description>
 			</entry>
@@ -115,7 +112,7 @@
 		</enum>
 		<!-- extend MAV_DATA_STREAM -->
 		<enum name="MAV_DATA_STREAM">
-			<entry value="13" name="MAV_DATA_STREAM_PROPULSION">
+			<entry name="MAV_DATA_STREAM_PROPULSION">
 				<description>Motor/ESC telemetry data.</description>
 			</entry>
 		</enum>
